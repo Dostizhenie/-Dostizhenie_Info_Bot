@@ -1,82 +1,7 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-Telegram Bot для школы тхэквондо "Достижение"
-Версия: 4.0 для Railway.app (python-telegram-bot 20.8)
-"""
-
-import json
 import logging
+import os
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ConversationHandler,
-    ContextTypes,
-    filters
-)
-
-# =======================
-# НАСТРОЙКИ
-# =======================
-
-# ВАЖНО! Замените на ваш токен от @BotFather
-BOT_TOKEN = "7958818251:AAH0r0gfsFnlHOD6K0lfvXJV7mxEgz9AVDQ"
-
-# Chat ID администраторов (используйте @userinfobot для получения)
-ADMINS = {
-    "oplata": 5033132467,      # Ксения - оплата
-    "spravka": 5324437110,     # Анастасия - справки/страховки
-    "competition": 985903815,   # Людмила - турниры
-    "other": 1481715825         # Агния - другие вопросы
-}
-
-# Состояния разговора
-WAITING_NAME, MAIN_MENU, WAITING_SPRAVKA, WAITING_STRAHOVKA, WAITING_PAYMENT_QUESTION = range(5)
-
-# База данных пользователей (в памяти)
-users_db = {}
-
-# =======================
-# ЗАГРУЗКА ДАННЫХ
-# =======================
-
-def load_tournament_data():
-    """Загружает данные о турнире из tournament.json"""
-    try:
-        with open('tournament.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {
-            "name": "Турнир по тхэквондо",
-            "date": "21 февраля 2026",
-            "location": "СК «Купол»",
-            "registration_link": "https://forms.gle/example",
-            "price": "1500 ₽",
-            "deadline": "15 февраля 2026",
-            "description": "Открытый турнир для всех возрастных категорий.\n\nТребования:\n• Защитное снаряжение\n• Добок (форма)\n• Медицинская справка"
-        }
-
-def load_events_data():
-    """Загружает данные о мероприятиях из events.json"""
-    try:
-        with open('events.json', 'r', encoding='utf-8') as f:
-            return json.load(f).get("events", [])
-    except FileNotFoundError:
-        return [
-            {
-                "name": "Аттестация на пояса",
-                "date": "28 февраля 2026",
-                "description": "Экзамен на повышение поясов для всех учеников"
-            },
-            {
-                "name": "Мастер-класс",
-                "date": "10 марта 2026",
-                "description": "Специальный мастер-класс от чемпиона России"
-            }
-        ]
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
 # Настройка логирования
 logging.basicConfig(
@@ -85,317 +10,288 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# =======================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# =======================
+# Токен бота
+BOT_TOKEN = "7974836537:AAGZnPxR8m0CQRmU2Hx117_KkhWKfBb4-yc"
 
-def get_main_menu_keyboard():
-    """Возвращает клавиатуру главного меню"""
+# ID администраторов
+ADMINS = {
+    "ksenia": "5033132467",      # Ксения - оплата
+    "anastasia": "5324437110",   # Анастасия - справки/страховки
+    "lyudmila": "9655903815",    # Людмила - резервный админ
+    "agnia": "1481715825"        # Агния - другие вопросы
+}
+
+# База данных пользователей (упрощённая - в памяти)
+users_db = {}
+
+# Состояния для ConversationHandler
+ASKING_CHILD_NAME, ASKING_QUESTION, UPLOADING_SPRAVKA, ASKING_PAYMENT_QUESTION = range(4)
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /start с обновлённым меню"""
+    user = update.effective_user
+    
+    # Приветственное сообщение
+    welcome_text = (
+        f"Здравствуйте, {user.first_name}! 👋\n\n"
+        f"Добро пожаловать в бот школы тхэквондо «Достижение»!\n\n"
+        f"Выберите нужный раздел:"
+    )
+    
+    # Обновлённые кнопки меню
     keyboard = [
-        [KeyboardButton("🏆 Регистрация на Турнир")],
+        [KeyboardButton("❓ Свой вопрос")],
         [KeyboardButton("📅 Ближайшие мероприятия")],
-        [KeyboardButton("📄 Отправить справку")],
-        [KeyboardButton("📄 Отправить страховку")],
+        [KeyboardButton("📄 Отправить справку/страховку")],
         [KeyboardButton("💰 Вопрос по оплате")],
-        [KeyboardButton("✏️ Изменить ФИО ребенка")]
+        [KeyboardButton("✏️ Изменить ФИО ребёнка")]
     ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+    
+    return ConversationHandler.END
 
-async def notify_admin(context: ContextTypes.DEFAULT_TYPE, admin_type: str, message: str):
-    """Отправляет уведомление администратору"""
-    admin_id = ADMINS.get(admin_type)
+
+async def handle_own_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кнопки 'Свой вопрос' - отправляет вопрос Агнии"""
+    await update.message.reply_text(
+        "Напишите ваш вопрос, и я передам его администратору Агнии.\n\n"
+        "Пожалуйста, опишите ваш вопрос подробно."
+    )
+    return ASKING_QUESTION
+
+
+async def receive_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получение вопроса и отправка Агнии"""
+    user = update.effective_user
+    question_text = update.message.text
+    child_name = users_db.get(user.id, "Не указано")
+    
+    # Формируем сообщение для админа Агнии
+    message = (
+        f"❓ НОВЫЙ ВОПРОС\n\n"
+        f"От: {user.full_name} (@{user.username or 'без username'})\n"
+        f"ID: {user.id}\n"
+        f"Ребёнок: {child_name}\n\n"
+        f"Вопрос:\n{question_text}"
+    )
+    
+    # Отправляем Агнии
+    admin_id = ADMINS.get("agnia")
     if admin_id:
         try:
             await context.bot.send_message(chat_id=admin_id, text=message)
+            await update.message.reply_text(
+                "✅ Ваш вопрос отправлен администратору Агнии!\n"
+                "Ожидайте ответа."
+            )
+            logger.info(f"Вопрос от {user.id} отправлен Агнии ({admin_id})")
         except Exception as e:
-            logger.error(f"Ошибка отправки администратору {admin_type}: {e}")
-
-# =======================
-# ОБРАБОТЧИКИ КОМАНД
-# =======================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
-    user_id = update.effective_user.id
-    
-    if user_id in users_db:
-        # Пользователь уже зарегистрирован
-        child_name = users_db[user_id]
-        await update.message.reply_text(
-            f"С возвращением! Ребёнок: {child_name}\n\n"
-            "Выберите действие:",
-            reply_markup=get_main_menu_keyboard()
-        )
-        return MAIN_MENU
+            logger.error(f"Ошибка отправки вопроса Агнии: {e}")
+            await update.message.reply_text(
+                "⚠️ Произошла ошибка при отправке. Попробуйте позже или свяжитесь напрямую."
+            )
     else:
-        # Новый пользователь
         await update.message.reply_text(
-            "👋 Добро пожаловать в бот школы тхэквондо «Достижение»!\n\n"
-            "Пожалуйста, введите ФИО вашего ребёнка:"
-        )
-        return WAITING_NAME
-
-async def handle_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ввода ФИО ребёнка"""
-    user_id = update.effective_user.id
-    child_name = update.message.text.strip()
-    
-    if len(child_name) < 3:
-        await update.message.reply_text("Пожалуйста, введите полное ФИО ребёнка:")
-        return WAITING_NAME
-    
-    users_db[user_id] = child_name
-    
-    await update.message.reply_text(
-        f"✅ Спасибо! Ребёнок зарегистрирован: {child_name}\n\n"
-        "Выберите действие:",
-        reply_markup=get_main_menu_keyboard()
-    )
-    return MAIN_MENU
-
-async def handle_change_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик изменения ФИО ребёнка"""
-    await update.message.reply_text("Введите новое ФИО ребёнка:")
-    return WAITING_NAME
-
-# =======================
-# ОБРАБОТЧИКИ МЕНЮ
-# =======================
-
-async def handle_tournament(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопки 'Регистрация на Турнир'"""
-    tournament = load_tournament_data()
-    
-    message = (
-        f"🏆 **{tournament['name']}**\n\n"
-        f"📅 Дата: {tournament['date']}\n"
-        f"📍 Место: {tournament['location']}\n"
-        f"💰 Взнос: {tournament['price']}\n"
-        f"⏰ Срок регистрации до: {tournament['deadline']}\n\n"
-        f"{tournament['description']}\n\n"
-        f"🔗 [Зарегистрироваться]({tournament['registration_link']})"
-    )
-    
-    await update.message.reply_text(
-        message,
-        parse_mode='Markdown',
-        disable_web_page_preview=True,
-        reply_markup=get_main_menu_keyboard()
-    )
-    
-    # Уведомляем администратора о запросе турнира
-    user = update.effective_user
-    child_name = users_db.get(user.id, "Не указано")
-    await notify_admin(
-        context,
-        "competition",
-        f"🏆 Запрос информации о турнире\n\n"
-        f"От: {user.full_name} (@{user.username})\n"
-        f"Ребёнок: {child_name}"
-    )
-    
-    return MAIN_MENU
-
-async def handle_events(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопки 'Ближайшие мероприятия'"""
-    events = load_events_data()
-    
-    if not events:
-        await update.message.reply_text(
-            "📅 В данный момент нет запланированных мероприятий.\n"
-            "Следите за обновлениями!",
-            reply_markup=get_main_menu_keyboard()
-        )
-        return MAIN_MENU
-    
-    message = "📅 **Ближайшие мероприятия:**\n\n"
-    for event in events:
-        message += (
-            f"🔹 **{event['name']}**\n"
-            f"Дата: {event['date']}\n"
-            f"{event['description']}\n\n"
+            "⚠️ Администратор не настроен. Обратитесь к разработчику бота."
         )
     
-    await update.message.reply_text(
-        message,
-        parse_mode='Markdown',
-        reply_markup=get_main_menu_keyboard()
-    )
-    return MAIN_MENU
+    return ConversationHandler.END
+
 
 async def handle_spravka_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопки 'Отправить справку'"""
+    """Обработчик кнопки 'Отправить справку/страховку'"""
     await update.message.reply_text(
-        "📄 Пожалуйста, отправьте фото или файл справки.\n\n"
-        "Для отмены введите /cancel"
+        "📄 Отправьте фото или файл справки/страховки.\n\n"
+        "Вы можете отправить документ одним сообщением."
     )
-    return WAITING_SPRAVKA
+    return UPLOADING_SPRAVKA
+
 
 async def handle_spravka_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик загрузки справки"""
+    """Обработчик загрузки справки/страховки"""
     user = update.effective_user
     child_name = users_db.get(user.id, "Не указано")
     
-    # Отправляем справку администраторам
+    # Формируем сообщение для админа
     message = (
-        f"📄 Новая справка\n\n"
-        f"От: {user.full_name} (@{user.username})\n"
+        f"📄 НОВАЯ СПРАВКА/СТРАХОВКА\n\n"
+        f"От: {user.full_name} (@{user.username or 'без username'})\n"
+        f"ID: {user.id}\n"
         f"Ребёнок: {child_name}"
     )
     
-    # Пересылаем Ксении и Анастасии
-    for admin_type in ["oplata", "spravka"]:
-        admin_id = ADMINS.get(admin_type)
-        if admin_id:
-            try:
-                await context.bot.send_message(chat_id=admin_id, text=message)
-                if update.message.photo:
-                    await context.bot.send_photo(
-                        chat_id=admin_id,
-                        photo=update.message.photo[-1].file_id
-                    )
-                elif update.message.document:
-                    await context.bot.send_document(
-                        chat_id=admin_id,
-                        document=update.message.document.file_id
-                    )
-            except Exception as e:
-                logger.error(f"Ошибка отправки справки администратору {admin_type}: {e}")
+    # Отправляем Анастасии (справки/страховки)
+    admin_id = ADMINS.get("anastasia")
+    if admin_id:
+        try:
+            # Отправляем текст
+            await context.bot.send_message(chat_id=admin_id, text=message)
+            
+            # Отправляем файл
+            if update.message.photo:
+                await context.bot.send_photo(
+                    chat_id=admin_id,
+                    photo=update.message.photo[-1].file_id
+                )
+            elif update.message.document:
+                await context.bot.send_document(
+                    chat_id=admin_id,
+                    document=update.message.document.file_id
+                )
+            
+            await update.message.reply_text(
+                "✅ Справка/страховка получена и отправлена администратору!\n"
+                "Ожидайте подтверждения."
+            )
+            logger.info(f"Справка от {user.id} отправлена Анастасии ({admin_id})")
+        except Exception as e:
+            logger.error(f"Ошибка отправки справки администратору: {e}")
+            await update.message.reply_text(
+                "⚠️ Произошла ошибка при отправке. Попробуйте позже."
+            )
+    else:
+        await update.message.reply_text(
+            "⚠️ Администратор не настроен. Обратитесь к разработчику бота."
+        )
     
-    await update.message.reply_text(
-        "✅ Справка отправлена администраторам!\n"
-        "Спасибо!",
-        reply_markup=get_main_menu_keyboard()
-    )
-    return MAIN_MENU
+    return ConversationHandler.END
 
-async def handle_strahovka_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопки 'Отправить страховку'"""
-    await update.message.reply_text(
-        "📄 Пожалуйста, отправьте фото или файл страховки.\n\n"
-        "Для отмены введите /cancel"
-    )
-    return WAITING_STRAHOVKA
-
-async def handle_strahovka_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик загрузки страховки"""
-    user = update.effective_user
-    child_name = users_db.get(user.id, "Не указано")
-    
-    # Отправляем страховку администраторам
-    message = (
-        f"📄 Новая страховка\n\n"
-        f"От: {user.full_name} (@{user.username})\n"
-        f"Ребёнок: {child_name}"
-    )
-    
-    # Пересылаем Ксении и Анастасии
-    for admin_type in ["oplata", "spravka"]:
-        admin_id = ADMINS.get(admin_type)
-        if admin_id:
-            try:
-                await context.bot.send_message(chat_id=admin_id, text=message)
-                if update.message.photo:
-                    await context.bot.send_photo(
-                        chat_id=admin_id,
-                        photo=update.message.photo[-1].file_id
-                    )
-                elif update.message.document:
-                    await context.bot.send_document(
-                        chat_id=admin_id,
-                        document=update.message.document.file_id
-                    )
-            except Exception as e:
-                logger.error(f"Ошибка отправки страховки администратору {admin_type}: {e}")
-    
-    await update.message.reply_text(
-        "✅ Страховка отправлена администраторам!\n"
-        "Спасибо!",
-        reply_markup=get_main_menu_keyboard()
-    )
-    return MAIN_MENU
 
 async def handle_payment_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик кнопки 'Вопрос по оплате'"""
     await update.message.reply_text(
-        "💰 Опишите ваш вопрос по оплате:\n\n"
-        "Для отмены введите /cancel"
+        "💰 Напишите ваш вопрос по оплате.\n\n"
+        "Администратор ответит вам в ближайшее время."
     )
-    return WAITING_PAYMENT_QUESTION
+    return ASKING_PAYMENT_QUESTION
 
-async def handle_payment_question_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик текста вопроса по оплате"""
+
+async def receive_payment_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получение вопроса по оплате"""
     user = update.effective_user
+    question_text = update.message.text
     child_name = users_db.get(user.id, "Не указано")
-    question = update.message.text
     
-    # Отправляем вопрос Ксении
+    # Формируем сообщение
     message = (
-        f"💰 Вопрос по оплате\n\n"
-        f"От: {user.full_name} (@{user.username})\n"
+        f"💰 ВОПРОС ПО ОПЛАТЕ\n\n"
+        f"От: {user.full_name} (@{user.username or 'без username'})\n"
+        f"ID: {user.id}\n"
         f"Ребёнок: {child_name}\n\n"
-        f"Вопрос:\n{question}"
+        f"Вопрос:\n{question_text}"
     )
     
-    await notify_admin(context, "oplata", message)
+    # Отправляем Ксении (оплата)
+    admin_id = ADMINS.get("ksenia")
+    if admin_id:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=message)
+            await update.message.reply_text(
+                "✅ Ваш вопрос по оплате отправлен администратору!\n"
+                "Ожидайте ответа."
+            )
+            logger.info(f"Вопрос по оплате от {user.id} отправлен Ксении ({admin_id})")
+        except Exception as e:
+            logger.error(f"Ошибка отправки вопроса по оплате: {e}")
+            await update.message.reply_text(
+                "⚠️ Произошла ошибка при отправке. Попробуйте позже."
+            )
+    else:
+        await update.message.reply_text(
+            "⚠️ Администратор не настроен. Обратитесь к разработчику бота."
+        )
+    
+    return ConversationHandler.END
+
+
+async def handle_change_child_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кнопки 'Изменить ФИО ребёнка'"""
+    user = update.effective_user
+    current_name = users_db.get(user.id, "Не указано")
     
     await update.message.reply_text(
-        "✅ Ваш вопрос отправлен администратору!\n"
-        "Ксения ответит вам в ближайшее время.",
-        reply_markup=get_main_menu_keyboard()
+        f"Текущее ФИО ребёнка: {current_name}\n\n"
+        f"Введите новое ФИО ребёнка:"
     )
-    return MAIN_MENU
+    return ASKING_CHILD_NAME
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /cancel"""
+
+async def save_child_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сохранение ФИО ребёнка"""
+    user = update.effective_user
+    child_name = update.message.text
+    
+    # Сохраняем в базу
+    users_db[user.id] = child_name
+    
     await update.message.reply_text(
-        "❌ Действие отменено.",
-        reply_markup=get_main_menu_keyboard()
+        f"✅ ФИО ребёнка сохранено: {child_name}\n\n"
+        f"Выберите нужный раздел из меню."
     )
-    return MAIN_MENU
+    
+    logger.info(f"Пользователь {user.id} сохранил ФИО ребёнка: {child_name}")
+    
+    return ConversationHandler.END
 
-# =======================
-# ГЛАВНАЯ ФУНКЦИЯ
-# =======================
+
+async def handle_events(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кнопки 'Ближайшие мероприятия'"""
+    # Здесь можно загрузить данные из файла events.json
+    events_text = (
+        "📅 БЛИЖАЙШИЕ МЕРОПРИЯТИЯ:\n\n"
+        "🥋 Тренировка для начинающих\n"
+        "📆 Дата: 10 февраля 2026, 18:00\n"
+        "📍 Место: Спортзал №1\n\n"
+        "🏆 Соревнования по тхэквондо\n"
+        "📆 Дата: 25 февраля 2026, 10:00\n"
+        "📍 Место: Дворец спорта\n\n"
+        "Для регистрации свяжитесь с тренером."
+    )
+    
+    await update.message.reply_text(events_text)
+
 
 def main():
     """Запуск бота"""
     # Создаём приложение
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Создаём ConversationHandler
+    # ConversationHandler для всех диалогов
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[
+            CommandHandler("start", start),
+            MessageHandler(filters.Regex("^❓ Свой вопрос$"), handle_own_question),
+            MessageHandler(filters.Regex("^📄 Отправить справку/страховку$"), handle_spravka_request),
+            MessageHandler(filters.Regex("^💰 Вопрос по оплате$"), handle_payment_question),
+            MessageHandler(filters.Regex("^✏️ Изменить ФИО ребёнка$"), handle_change_child_name),
+            MessageHandler(filters.Regex("^📅 Ближайшие мероприятия$"), handle_events),
+        ],
         states={
-            WAITING_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_name_input)
-            ],
-            MAIN_MENU: [
-                MessageHandler(filters.Regex('^🏆 Регистрация на Турнир$'), handle_tournament),
-                MessageHandler(filters.Regex('^📅 Ближайшие мероприятия$'), handle_events),
-                MessageHandler(filters.Regex('^📄 Отправить справку$'), handle_spravka_request),
-                MessageHandler(filters.Regex('^📄 Отправить страховку$'), handle_strahovka_request),
-                MessageHandler(filters.Regex('^💰 Вопрос по оплате$'), handle_payment_question),
-                MessageHandler(filters.Regex('^✏️ Изменить ФИО ребенка$'), handle_change_name),
-            ],
-            WAITING_SPRAVKA: [
-                MessageHandler(filters.PHOTO | filters.Document.ALL, handle_spravka_upload)
-            ],
-            WAITING_STRAHOVKA: [
-                MessageHandler(filters.PHOTO | filters.Document.ALL, handle_strahovka_upload)
-            ],
-            WAITING_PAYMENT_QUESTION: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_payment_question_text)
-            ],
+            ASKING_CHILD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_child_name)],
+            ASKING_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_question)],
+            UPLOADING_SPRAVKA: [MessageHandler(filters.PHOTO | filters.Document.ALL, handle_spravka_upload)],
+            ASKING_PAYMENT_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_payment_question)],
         },
-        fallbacks=[CommandHandler('cancel', cancel)],
+        fallbacks=[CommandHandler("start", start)],
     )
     
+    # Добавляем обработчики
     application.add_handler(conv_handler)
     
     # Запускаем бота
     logger.info("✅ Бот запущен и готов к работе!")
-    application.run_polling(drop_pending_updates=True)
+    logger.info(f"Администраторы настроены:")
+    logger.info(f"  - Агния (вопросы): {ADMINS['agnia']}")
+    logger.info(f"  - Анастасия (справки): {ADMINS['anastasia']}")
+    logger.info(f"  - Ксения (оплата): {ADMINS['ksenia']}")
+    logger.info(f"  - Людмила (резерв): {ADMINS['lyudmila']}")
+    
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
